@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>车牌识别上传</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        body { font-family: system-ui, Arial; max-width: 980px; margin: 40px auto; padding: 0 16px; }
+        .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+        button { padding: 8px 14px; border-radius: 8px; border: 1px solid #e5e7eb; background: #111827; color: #fff; cursor: pointer; }
+        button:disabled { opacity: .6; cursor: not-allowed; }
+        .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .hint { color: #6b7280; font-size: 14px; }
+        .err { color: #b91c1c; }
+        .ok { color: #065f46; }
+        video { width: 100%; border-radius: 12px; margin-top: 12px; background:#000; }
+        table { width:100%; border-collapse: collapse; margin-top: 12px; }
+        th, td { padding: 8px 10px; border-bottom: 1px solid #e5e7eb; text-align: left; }
+        th { user-select: none; cursor: pointer; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+        .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:12px; }
+    </style>
+</head>
+<body>
+<h2>车牌识别（离线插帧流水线）</h2>
+
+<div class="card">
+    <div class="row">
+        <input id="file" type="file" accept="video/*" />
+        <button id="btn">上传并识别</button>
+        <span id="status" class="hint"></span>
+    </div>
+
+    <div id="result"></div>
+
+    <div id="stats-block" style="display:none; margin-top:16px;">
+        <h3 style="margin:8px 0 4px;">识别统计 <span id="stats-sub" class="hint"></span></h3>
+        <div class="hint" id="stats-hint">展示每个车牌的<strong>最大文字识别置信度</strong>与<strong>出现次数（样本数）</strong>。</div>
+        <div style="overflow:auto;">
+            <table id="stats-table">
+                <thead>
+                <tr>
+                    <th data-key="license_number">车牌</th>
+                    <th data-key="max_text_score" title="越高越好">最大文字置信度</th>
+                    <th data-key="samples" title="出现次数（CSV中记录行数）">样本数</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    const $ = (s)=>document.querySelector(s);
+    const fileInput = $('#file');
+    const btn = $('#btn');
+    const status = $('#status');
+    const result = $('#result');
+    const statsBlock = $('#stats-block');
+    const statsTable = $('#stats-table').querySelector('tbody');
+    const statsSub = $('#stats-sub');
+
+    function fmtScore(x){
+      if (x === null || x === undefined || Number.isNaN(x)) return '-';
+      return Number(x).toFixed(4);
+    }
+
+    function renderStats(stats, label){
+      if (!Array.isArray(stats) || stats.length === 0) {
+        statsBlock.style.display = 'none';
+        return;
+      }
+      // 默认按 最大文字置信度 降序
+      stats.sort((a,b)=>(b.max_text_score??-1) - (a.max_text_score??-1));
+
+      statsTable.innerHTML = stats.map(r => `
+        <tr>
+          <td class="mono">${r.license_number ?? '-'}</td>
+          <td>${fmtScore(r.max_text_score)}</td>
+          <td>${r.samples ?? 0}</td>
+        </tr>
+      `).join('');
+      statsSub.textContent = label ? `（${label}）` : '';
+      statsBlock.style.display = '';
+    }
+
+    async function fetchStatsFallback(downloadUrl){
+      // 兜底方案：调用你自定义的统计接口，例如 /api/alpr/stats?run=<文件名>
+      // 你可以在后端用前面我们写的统计逻辑直接读 test.csv / plate_max_scores.csv 返回 JSON。
+      try {
+        const u = new URL(downloadUrl, location.origin);
+        const run = u.pathname.split('/').pop(); // 取输出文件名作为一次“run”的标记
+        const r = await fetch(`/api/alpr/stats?run=${encodeURIComponent(run)}`);
+        if (!r.ok) throw new Error(String(r.status));
+        const data = await r.json();
+        // 期望 data 结构：
+        // { stats: [{ license_number: "NI13NQU", max_text_score: 0.5693, samples: 47 }, ...] }
+        return data.stats || [];
+      } catch(e) {
+        return [];
+      }
+    }
+
+    btn.addEventListener('click', async () => {
+      if (!fileInput.files.length) { alert('请选择一个视频文件'); return; }
+      btn.disabled = true; status.textContent = '正在处理（CPU 会较慢）…'; result.innerHTML = ''; statsBlock.style.display = 'none';
+
+      try {
+        const fd = new FormData();
+        fd.append('file', fileInput.files[0]);
+        const r = await fetch('/api/alpr/video', { method: 'POST', body: fd });
+        const data = await r.json();
+        if (data.error) throw new Error(data.error);
+
+        // 渲染视频
+        status.textContent = '完成 ✓';
+        result.innerHTML = `
+          <p>结果地址：<a class="mono" href="${data.download_url}" target="_blank">${data.download_url}</a></p>
+          <video controls preload="metadata" playsinline src="${data.download_url}"></video>
+          <p><a href="${data.download_url}" download>下载结果</a></p>
+        `;
+
+        // 1) 优先使用后端直接返回的 stats（推荐在 /api/alpr/video 响应里加）
+        // 期望格式：
+        // data.stats = [{ license_number: "NI13NQU", max_text_score: 0.5693, samples: 47 }, ...]
+        let stats = Array.isArray(data.stats) ? data.stats : [];
+
+        // 2) 如果没有，就调用 /api/alpr/stats 兜底（后端实现参考我们之前的统计脚本）
+        if (stats.length === 0) {
+          stats = await fetchStatsFallback(data.download_url);
+        }
+
+        if (stats.length > 0) {
+          renderStats(stats, '来源：服务端统计');
+        } else {
+          renderStats([], '');
+          $('#stats-hint').innerHTML = '<span class="err">未获取到统计数据：请在后端响应中返回 <code>data.stats</code>，或提供 <code>/api/alpr/stats</code> 接口。</span>';
+          statsBlock.style.display = '';
+        }
+
+      } catch (e) {
+        status.textContent = '';
+        result.innerHTML = `<p class="err">错误：${e.message}</p>`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+</script>
+</body>
+</html>

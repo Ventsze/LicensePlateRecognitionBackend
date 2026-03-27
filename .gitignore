@@ -1,0 +1,9 @@
+/.idea/
+/target/
+/thumbs/
+/.mvn/
+*.iml
+*.class
+*.mp4
+*.jpg
+.DS_Store
