@@ -44,7 +44,7 @@ public class SessionsQueryController {
                 if (tariffOpt.isPresent()) {
                     // 使用 FeeCalculator 计算从入场到当前的费用
                     // 入场时间：session.getEntryTime()，当前时间：Instant.now()
-                    session.setFee(feeCalculator.calc(session.getEntryTime(), Instant.now(), tariffOpt.get()));
+                    session.setFee(feeCalculator.calc(session.getPlate(), session.getEntryTime(), Instant.now(), tariffOpt.get()));
                 }
             }
             return ResponseEntity.ok(session);

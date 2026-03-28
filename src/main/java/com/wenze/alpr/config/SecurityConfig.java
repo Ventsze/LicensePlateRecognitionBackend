@@ -26,7 +26,7 @@ public class SecurityConfig {
 
                 // 1. 配置权限拦截规则
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/login", "/api/login", "/index.html", "/static/**", "/assets/**", "/api/parking/**").permitAll()
+                        .requestMatchers("/login", "/api/login", "/index.html", "/static/**", "/assets/**", "/api/parking/**","/api/wallet/**").permitAll()
                         .anyRequest().authenticated()
                 )
 

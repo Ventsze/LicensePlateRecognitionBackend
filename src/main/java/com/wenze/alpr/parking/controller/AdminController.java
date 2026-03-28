@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -43,6 +44,8 @@ public class AdminController {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("id", v.getId());
                     m.put("plate", v.getPlate());
+                    // 👉 新增：将到期时间返回给前端
+                    m.put("vipExpireTime", v.getVipExpireTime());
                     return m;
                 })
                 .collect(Collectors.toList());
@@ -50,16 +53,36 @@ public class AdminController {
 
     // ========== 添加白名单 ==========
     @PostMapping("/whitelist")
-    public ResponseEntity<?> addWhitelist(@RequestBody Map<String, String> body) {
-        String plate = body.get("plate");
+    public ResponseEntity<?> addWhitelist(@RequestBody Map<String, Object> body) { // 👉 注意这里改成了 Object
+        String plate = (String) body.get("plate");
         if (plate == null || plate.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(simpleErr("车牌号不能为空"));
+        }
+
+        // 👉 新增：解析前端传来的 days，如果没有传，默认 30 天
+        int days = 30;
+        if (body.containsKey("days")) {
+            Object daysObj = body.get("days");
+            if (daysObj instanceof Number) {
+                days = ((Number) daysObj).intValue();
+            } else if (daysObj instanceof String) {
+                days = Integer.parseInt((String) daysObj);
+            }
         }
 
         // 查找数据库里是否已经有这辆车，如果没有就新建一个
         Vehicle vehicle = vehicles.findByPlate(plate).orElse(new Vehicle());
         vehicle.setPlate(plate);
-        vehicle.setType(Vehicle.Type.whitelist); // 标记为白名单
+        vehicle.setType(Vehicle.Type.whitelist); // 标记为白名单/VIP
+
+        // 👉 新增：计算并设置到期时间
+        if (days >= 9999) {
+            // 前端传 9999 代表永久，我们把到期时间设为 null
+            vehicle.setVipExpireTime(null);
+        } else {
+            // 当前时间 + 购买的天数
+            vehicle.setVipExpireTime(Instant.now().plus(days, ChronoUnit.DAYS));
+        }
 
         vehicles.save(vehicle);
 
@@ -91,10 +114,7 @@ public class AdminController {
 
         // 4. 计算费用
         Tariff t = tariffs.findFirstByActiveTrue().orElse(null);
-        BigDecimal fee = BigDecimal.ZERO;
-        if (!isWhitelist && t != null) {
-            fee = feeCalculator.calc(session.getEntryTime(), now, t);
-        }
+        BigDecimal fee = feeCalculator.calc(session.getPlate(), session.getEntryTime(), now, t);
 
         // 5. 更新状态并保存
         session.setFee(fee);

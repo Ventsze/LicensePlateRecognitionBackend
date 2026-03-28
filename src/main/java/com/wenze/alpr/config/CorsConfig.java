@@ -13,7 +13,8 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/api/**")
-                        .allowedOrigins("http://localhost:5173")   // React 本地开发地址
+                        .allowedOrigins("*")
+//                      .allowedOrigins("http://localhost:5173")   // React 本地开发地址
                         .allowedMethods("GET","POST","PUT","DELETE","OPTIONS")
                         .allowedHeaders("*")
                         .exposedHeaders("Content-Disposition")

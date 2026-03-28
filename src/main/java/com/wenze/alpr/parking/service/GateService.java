@@ -119,7 +119,7 @@ public class GateService {
         s.setExitGateId(null);
 
         Tariff t = tariffs.findById(s.getTariffId()).orElseThrow();
-        BigDecimal fee = feeCalc.calc(s.getEntryTime(), s.getExitTime(), t);
+        BigDecimal fee = feeCalc.calc(s.getPlate(), s.getEntryTime(), s.getExitTime(), t);
         s.setFee(fee);
 
         boolean whitelist = isWhitelist(finalPlate);
